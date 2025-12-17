@@ -1,0 +1,3 @@
+[submodule "CRMArena"]
+	path = CRMArena
+	url = https://github.com/Sophon96/CRMArena.git
