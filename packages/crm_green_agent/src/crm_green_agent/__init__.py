@@ -2,4 +2,7 @@
 
 from .agent import start_green_agent, CRMGreenAgentExecutor
 
-__all__ = ["start_green_agent", "CRMGreenAgentExecutor"]
+__all__ = [
+    "start_green_agent",
+    "CRMGreenAgentExecutor",
+]

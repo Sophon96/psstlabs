@@ -46,6 +46,13 @@ cp .env.example .env
 ```python
 from src.crm_green_agent import start_green_agent
 
+# Configure logging (optional)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt='%Y-%m-%d %H:%M:%S',
+)
+
 # Start the server
 start_green_agent(host="localhost", port=9001)
 ```
@@ -54,6 +61,43 @@ Or from command line:
 
 ```bash
 python -m src.crm_green_agent.agent
+```
+
+### Logging Configuration
+
+The agent uses Python's logging module. Make sure to configure logging before using the agent. You can configure logging in several ways:
+
+```python
+import logging
+
+# Minimal setup
+logging.basicConfig()
+
+# Suggested: Basic setup with good formatting
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt='%Y-%m-%d %H:%M:%S',
+)
+
+# Advanced: Write logs to file and console with different levels
+import logging.handlers
+import sys
+
+console_handler = logging.StreamHandler(sys.stderr)
+console_handler.setLevel("INFO")
+file_handler = logging.handlers.RotatingFileHandler("agent.log", maxBytes=1048576, backupCount=8)
+file_handler.setLevel("DEBUG")
+
+logging.basicConfig(
+    level=logging.NOTSET,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[console_handler, file_handler]
+)
+
+# Get a logger for your module
+logger = logging.getLogger(__name__)
 ```
 
 ### Sending an Evaluation Request

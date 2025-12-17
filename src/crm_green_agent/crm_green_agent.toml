@@ -1,7 +1,0 @@
-[agent]
-name = "CRM Green Agent"
-description = "CRMArena evaluation agent that tests other agents on CRM tasks using Salesforce environments"
-
-[agent.capabilities]
-accepts_tasks = true
-streaming = false

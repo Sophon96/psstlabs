@@ -1,38 +1,32 @@
 """CRM Green Agent implementation - manages CRMArena task assessment and evaluation."""
 
-import uvicorn
-import tomllib
-import dotenv
 import json
+import logging
 import time
-import sys
-import os
+import tomllib
 from pathlib import Path
 
-# Add CRMArena to path
-crm_arena_path = Path(__file__).parent.parent.parent / "CRMArena"
-sys.path.insert(0, str(crm_arena_path))
+import dotenv
+import uvicorn
 
-from a2a.server.apps import A2AStarletteApplication
-from a2a.server.request_handlers import DefaultRequestHandler
+# Configure logging
+logger = logging.getLogger(__name__)
+
 from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.apps import A2AStarletteApplication
 from a2a.server.events import EventQueue
+from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
-from a2a.types import AgentCard, SendMessageSuccessResponse, Message
-from a2a.utils import new_agent_text_message, get_text_parts
-
+from a2a.types import AgentCard, Message, SendMessageSuccessResponse
+from a2a.utils import get_text_parts, new_agent_text_message
 from crm_sandbox.agents import ChatAgent, ToolCallAgent
-from crm_sandbox.data.assets import (
-    TASKS_ORIGINAL, SCHEMA_ORIGINAL,
-    TASKS_B2B, TASKS_B2C,
-    B2B_SCHEMA, B2C_SCHEMA
-)
-from crm_sandbox.env.env import ChatEnv, ToolEnv
+from crm_sandbox.data.assets import (B2B_SCHEMA, B2C_SCHEMA, SCHEMA_ORIGINAL,
+                                     TASKS_B2B, TASKS_B2C, TASKS_ORIGINAL)
 from crm_sandbox.env import TOOLS, TOOLS_FULL
+from crm_sandbox.env.env import ChatEnv, ToolEnv
 
 # Import utilities
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from my_util import parse_tags, my_a2a
+from .util import send_message, parse_tags
 
 dotenv.load_dotenv()
 
@@ -107,11 +101,12 @@ Next, I'll provide you with tool call results or follow-up information.
     context_id = None
 
     for step in range(max_num_steps):
-        print(f"@@@ Green agent: Sending message to white agent (step {step + 1}/{max_num_steps}){'ctx_id=' + str(context_id) if context_id else ''}... -->")
-        print(f"{next_green_message[:200]}..." if len(next_green_message) > 200 else next_green_message)
+        ctx_info = f"ctx_id={context_id}" if context_id else "no context"
+        logger.info(f"Sending message to white agent (step {step + 1}/{max_num_steps}, {ctx_info})")
+        logger.debug(f"Message content: {next_green_message[:200]}..." if len(next_green_message) > 200 else f"Message content: {next_green_message}")
 
         # Send message to white agent via A2A protocol
-        white_agent_response = await my_a2a.send_message(
+        white_agent_response = await send_message(
             white_agent_url, next_green_message, context_id=context_id
         )
 
@@ -129,7 +124,8 @@ Next, I'll provide you with tool call results or follow-up information.
         text_parts = get_text_parts(res_result.parts)
         assert len(text_parts) == 1, "Expecting exactly one text part from the white agent"
         white_text = text_parts[0]
-        print(f"@@@ White agent response:\n{white_text}")
+        logger.info(f"White agent response received")
+        logger.debug(f"White agent response:\n{white_text}")
 
         # Parse the action from white agent's response
         action = None
@@ -151,16 +147,16 @@ Next, I'll provide you with tool call results or follow-up information.
                         "arguments": action_dict.get("arguments", action_dict.get("kwargs", {}))
                     }
                 except json.JSONDecodeError as e:
-                    print(f"Failed to parse JSON from white agent: {e}")
+                    logger.error(f"Failed to parse JSON from white agent: {e}")
                     action = None
 
         if action is None:
-            print("Warning: Could not parse valid action from white agent response")
+            logger.warning("Could not parse valid action from white agent response")
             next_green_message = "I couldn't understand your response. Please use the correct format: <execute>query</execute> or <respond>answer</respond>"
             continue
 
         # Execute the action in the CRMArena environment
-        print(f"Executing action: {action['name']}")
+        logger.info(f"Executing action: {action['name']}")
         obs, reward, done, step_info = env.step(action)
         info = {**info, **step_info}
 
@@ -206,7 +202,7 @@ class CRMGreenAgentExecutor(AgentExecutor):
         }
         </env_config>
         """
-        print("Green agent: Received a task, parsing...")
+        logger.info("Received evaluation task, parsing request...")
         user_input = context.get_user_input()
         tags = parse_tags(user_input)
 
@@ -214,6 +210,7 @@ class CRMGreenAgentExecutor(AgentExecutor):
         env_config_str = tags.get("env_config")
 
         if not white_agent_url or not env_config_str:
+            logger.error("Missing required tags in request")
             await event_queue.enqueue_event(
                 new_agent_text_message(
                     "Error: Missing required tags <white_agent_url> or <env_config>"
@@ -222,9 +219,10 @@ class CRMGreenAgentExecutor(AgentExecutor):
             return
 
         env_config = json.loads(env_config_str)
+        logger.debug(f"Parsed config: {env_config}")
 
         # Set up the environment
-        print("Green agent: Setting up the environment...")
+        logger.info("Setting up CRMArena environment...")
         assert len(env_config["task_ids"]) == 1, "Only single task supported for demo purpose"
         task_index = env_config["task_ids"][0]
 
@@ -240,18 +238,21 @@ class CRMGreenAgentExecutor(AgentExecutor):
             TASKS_NATURAL = TASKS_ORIGINAL
             SCHEMA = SCHEMA_ORIGINAL
 
-        selected_tasks = {t['idx']: t for t in TASKS_NATURAL}
+        selected_tasks = {t['idx']: t for t in TASKS_NATURAL} # pyright: ignore[reportArgumentType, reportCallIssue]
         agent_strategy = env_config.get("agent_strategy", "react")
         max_turns = env_config.get("max_turns", 20)
 
+        logger.info(f"Using strategy: {agent_strategy}, org_type: {org_type}, task_index: {task_index}")
+
         # Create appropriate environment
         if agent_strategy in ["react", "act"]:
-            env = ChatEnv(tasks=selected_tasks, org_type=org_type)
+            env = ChatEnv(tasks=selected_tasks, org_type=org_type) # pyright: ignore[reportArgumentType]
         elif agent_strategy == "tool_call":
-            env = ToolEnv(tools=TOOLS, tasks=selected_tasks, org_type=org_type)
+            env = ToolEnv(tools=TOOLS, tasks=selected_tasks, org_type=org_type) # pyright: ignore[reportArgumentType]
         elif agent_strategy == "tool_call_flex":
-            env = ToolEnv(tools=TOOLS_FULL, tasks=selected_tasks, org_type=org_type)
+            env = ToolEnv(tools=TOOLS_FULL, tasks=selected_tasks, org_type=org_type) # pyright: ignore[reportArgumentType]
         else:
+            logger.error(f"Unknown agent_strategy: {agent_strategy}")
             await event_queue.enqueue_event(
                 new_agent_text_message(f"Error: Unknown agent_strategy: {agent_strategy}")
             )
@@ -259,7 +260,7 @@ class CRMGreenAgentExecutor(AgentExecutor):
 
         metrics = {}
 
-        print("Green agent: Starting evaluation...")
+        logger.info("Starting evaluation...")
         timestamp_started = time.time()
 
         try:
@@ -271,7 +272,7 @@ class CRMGreenAgentExecutor(AgentExecutor):
             result_bool = metrics["success"] = res["reward"] == 1
             result_emoji = "✅" if result_bool else "❌"
 
-            print("Green agent: Evaluation complete.")
+            logger.info(f"Evaluation complete. Success: {result_bool}, Time: {metrics['time_used']:.2f}s")
             await event_queue.enqueue_event(
                 new_agent_text_message(
                     f"Finished. White agent success: {result_emoji}\n"
@@ -280,9 +281,7 @@ class CRMGreenAgentExecutor(AgentExecutor):
                 )
             )
         except Exception as e:
-            print(f"Error during evaluation: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error during evaluation: {e}", exc_info=True)
             await event_queue.enqueue_event(
                 new_agent_text_message(f"Error during evaluation: {str(e)}")
             )
@@ -293,7 +292,7 @@ class CRMGreenAgentExecutor(AgentExecutor):
 
 def start_green_agent(agent_name="crm_green_agent", host="localhost", port=9001):
     """Start the CRM green agent server."""
-    print("Starting CRM green agent...")
+    logger.info(f"Starting CRM green agent server on {host}:{port}")
     agent_card_dict = load_agent_card_toml(agent_name)
     url = f"http://{host}:{port}"
     agent_card_dict["url"] = url  # complete all required card fields
@@ -308,8 +307,24 @@ def start_green_agent(agent_name="crm_green_agent", host="localhost", port=9001)
         http_handler=request_handler,
     )
 
+    logger.info("Server initialized, starting uvicorn...")
     uvicorn.run(app.build(), host=host, port=port)
 
 
 if __name__ == "__main__":
+    import logging.handlers
+    import sys
+
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setLevel("INFO")
+    file_handler = logging.handlers.RotatingFileHandler("agent.log", maxBytes=1048576, backupCount=8)
+    file_handler.setLevel("DEBUG")
+
+    logging.basicConfig(
+        level=logging.NOTSET,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[console_handler, file_handler]
+    )
+
     start_green_agent()

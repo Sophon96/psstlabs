@@ -1,0 +1,28 @@
+name = "CRM Green Agent"
+description = "CRMArena evaluation agent that tests other agents on CRM tasks using Salesforce environments"
+version = "0.1.0"
+
+defaultInputModes = ["text"]
+defaultOutputModes = ["text"]
+
+[capabilities]
+streaming = false
+
+[[skills]]
+id = "psstlabs_assess_crmarena"
+name = "agentified CRMArena"
+description = """
+Assess an agent's ability in CRM scenarios.
+"""
+tags = ["green agent", "assessment hosting", "crmarena", "salesforce", "b2b", "b2c"]
+examples = ["""    
+<white_agent_url>http://localhost:9002</white_agent_url>
+<env_config>
+{
+    "org_type": "b2b",
+    "agent_strategy": "react",
+    "task_ids": [0],
+    "max_turns": 20
+}
+</env_config>
+"""]
