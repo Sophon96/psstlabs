@@ -32,10 +32,10 @@ Based on the Tau Bench green agent pattern, adapted for CRMArena:
 
 ```bash
 # Install dependencies
-uv pip install -e .
+uv sync
 
 # Set up environment variables
-cp .env.example .env
+touch .env
 # Edit .env and add your GOOGLE_API_KEY and Salesforce credentials
 ```
 
@@ -60,10 +60,23 @@ start_green_agent(host="localhost", port=9001)
 Or from command line:
 
 ```bash
+# Option 1
 python -m src.crm_green_agent.agent
+
+# Option 2
+python -m src.crm_green_agent
+
+# Option 3
+uv build
+crm_green_agent
+
+# Option 4 (pretty much option 3)
+uv run crm-green-agent
 ```
 
 ### Logging Configuration
+
+This section only applies if using the agent programmatically, not if using the agent from the command line.
 
 The agent uses Python's logging module. Make sure to configure logging before using the agent. You can configure logging in several ways:
 
@@ -215,12 +228,10 @@ The agent supports all CRMArena task categories:
 ```
 src/crm_green_agent/
 ├── __init__.py              # Package exports
+├── __main__.py              # Top-level code (e.g. command line app)
 ├── agent.py                 # Main agent implementation
 ├── crm_green_agent.toml     # Agent card configuration
-└── README.md                # This file
-
-src/
-└── my_util.py               # Shared utilities (parse_tags, A2A client)
+└── util.py                  # Shared utilities (parse_tags, A2A client)
 ```
 
 ### Key Components
@@ -251,7 +262,7 @@ Basic smoke test:
 
 ```bash
 # Start the green agent
-python -m src.crm_green_agent.agent
+crm-green-agent
 
 # In another terminal, send a test request using an A2A client
 # (Requires a running white agent on port 9002)
